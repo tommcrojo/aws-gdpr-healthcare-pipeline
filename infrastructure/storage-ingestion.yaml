@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: S3 bucket for GDPR healthcare pipeline
+Description: S3 bucket and Kinesis Firehose for GDPR healthcare pipeline
 
 Parameters:
   EnvironmentName:
@@ -77,6 +77,37 @@ Resources:
               'Null':
                 s3:x-amz-server-side-encryption: 'true'
 
+  # Kinesis Firehose Delivery Stream
+  HealthcareDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DependsOn:
+      - RawDataBucketPolicy
+    Properties:
+      DeliveryStreamName: !Sub ${EnvironmentName}-delivery-stream
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt RawDataBucket.Arn
+        RoleARN:
+          Fn::ImportValue: !Sub ${EnvironmentName}-FirehoseRoleArn
+        BufferingHints:
+          SizeInMBs: 128
+          IntervalInSeconds: 300
+        CompressionFormat: UNCOMPRESSED
+        Prefix: raw/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/
+        ErrorOutputPrefix: errors/!{firehose:error-output-type}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/
+        EncryptionConfiguration:
+          KMSEncryptionConfig:
+            AWSKMSKeyARN:
+              Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName:
+            Fn::ImportValue: !Sub ${EnvironmentName}-FirehoseLogGroupName
+          LogStreamName: S3Delivery
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-delivery-stream
+
 Outputs:
   RawBucketName:
     Description: Name of the raw data S3 bucket
@@ -89,3 +120,15 @@ Outputs:
     Value: !GetAtt RawDataBucket.Arn
     Export:
       Name: !Sub ${EnvironmentName}-RawBucketArn
+
+  DeliveryStreamName:
+    Description: Name of the Firehose delivery stream
+    Value: !Ref HealthcareDeliveryStream
+    Export:
+      Name: !Sub ${EnvironmentName}-DeliveryStreamName
+
+  DeliveryStreamArn:
+    Description: ARN of the Firehose delivery stream
+    Value: !GetAtt HealthcareDeliveryStream.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-DeliveryStreamArn
