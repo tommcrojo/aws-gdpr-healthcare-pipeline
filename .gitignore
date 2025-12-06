@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# AWS
+.aws-sam/
+samconfig.toml
+
+# Temp
+.tmp/
+*.log
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
