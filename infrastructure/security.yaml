@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: KMS CMK and IAM roles for GDPR healthcare pipeline
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: gdpr-healthcare
+    Description: Environment name prefix for resources
+
+Resources:
+  # Customer Managed KMS Key
+  HealthcareDataKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: CMK for encrypting healthcare data in the GDPR pipeline
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: healthcare-data-key-policy
+        Statement:
+          - Sid: AllowAccountRoot
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowFirehoseService
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-cmk
+
+  HealthcareDataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${EnvironmentName}-cmk
+      TargetKeyId: !Ref HealthcareDataKey
+
+  # IAM Role for Firehose Delivery
+  FirehoseDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-firehose-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: FirehoseDeliveryPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3Access
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${EnvironmentName}-raw-*
+                  - !Sub arn:aws:s3:::${EnvironmentName}-raw-*/*
+              - Sid: KMSAccess
+                Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Resource: !GetAtt HealthcareDataKey.Arn
+              - Sid: CloudWatchLogsAccess
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                  - logs:CreateLogStream
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/${EnvironmentName}-*:*
+
+  # CloudWatch Log Group for Firehose
+  FirehoseLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/kinesisfirehose/${EnvironmentName}-delivery-stream
+      RetentionInDays: 30
+
+  FirehoseLogStream:
+    Type: AWS::Logs::LogStream
+    Properties:
+      LogGroupName: !Ref FirehoseLogGroup
+      LogStreamName: S3Delivery
+
+Outputs:
+  KmsKeyArn:
+    Description: ARN of the healthcare data KMS key
+    Value: !GetAtt HealthcareDataKey.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-KmsKeyArn
+
+  KmsKeyId:
+    Description: ID of the healthcare data KMS key
+    Value: !Ref HealthcareDataKey
+    Export:
+      Name: !Sub ${EnvironmentName}-KmsKeyId
+
+  FirehoseRoleArn:
+    Description: ARN of the Firehose delivery role
+    Value: !GetAtt FirehoseDeliveryRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-FirehoseRoleArn
+
+  FirehoseLogGroupName:
+    Description: CloudWatch Log Group for Firehose
+    Value: !Ref FirehoseLogGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-FirehoseLogGroupName
