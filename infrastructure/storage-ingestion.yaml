@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 bucket for GDPR healthcare pipeline
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: gdpr-healthcare
+    Description: Environment name prefix for resources
+
+Resources:
+  # Raw Data S3 Bucket
+  RawDataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ${EnvironmentName}-raw-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID:
+                Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIntelligentTiering
+            Status: Enabled
+            Transitions:
+              - StorageClass: INTELLIGENT_TIERING
+                TransitionInDays: 90
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-raw-bucket
+        - Key: DataClassification
+          Value: PHI
+
+  # Bucket Policy - Enforce TLS and encryption
+  RawDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RawDataBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyNonTLSAccess
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt RawDataBucket.Arn
+              - !Sub ${RawDataBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+          - Sid: DenyIncorrectEncryptionHeader
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub ${RawDataBucket.Arn}/*
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyUnencryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub ${RawDataBucket.Arn}/*
+            Condition:
+              'Null':
+                s3:x-amz-server-side-encryption: 'true'
+
+Outputs:
+  RawBucketName:
+    Description: Name of the raw data S3 bucket
+    Value: !Ref RawDataBucket
+    Export:
+      Name: !Sub ${EnvironmentName}-RawBucketName
+
+  RawBucketArn:
+    Description: ARN of the raw data S3 bucket
+    Value: !GetAtt RawDataBucket.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-RawBucketArn
