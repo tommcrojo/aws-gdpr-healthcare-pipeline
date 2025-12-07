@@ -14,7 +14,8 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      BucketName: !Sub ${EnvironmentName}-raw-${AWS::AccountId}-${AWS::Region}
+      # BucketName omitted - CloudFormation auto-generates unique name
+      # This allows redeploy after teardown without naming conflicts
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:

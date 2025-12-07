@@ -77,8 +77,8 @@ Resources:
                   - s3:ListBucketMultipartUploads
                   - s3:PutObject
                 Resource:
-                  - !Sub arn:aws:s3:::${EnvironmentName}-raw-*
-                  - !Sub arn:aws:s3:::${EnvironmentName}-raw-*/*
+                  - !Sub arn:aws:s3:::${EnvironmentName}-*
+                  - !Sub arn:aws:s3:::${EnvironmentName}-*/*
               - Sid: KMSAccess
                 Effect: Allow
                 Action:
