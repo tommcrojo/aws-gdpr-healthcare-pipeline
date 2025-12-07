@@ -252,6 +252,8 @@ Resources:
         '--QUARANTINE_BUCKET': !Ref QuarantineDataBucket
         '--SECRET_ARN':
           Fn::ImportValue: !Sub ${EnvironmentName}-HashingSaltSecretArn
+        '--KMS_KEY_ARN':
+          Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
         '--DATABASE_NAME': !Ref HealthcareDatabase
         '--TABLE_NAME': curated_health_records
       ExecutionProperty:

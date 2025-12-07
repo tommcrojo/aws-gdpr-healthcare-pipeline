@@ -30,7 +30,8 @@ args = getResolvedOptions(sys.argv, [
     'QUARANTINE_BUCKET',
     'SECRET_ARN',
     'DATABASE_NAME',
-    'TABLE_NAME'
+    'TABLE_NAME',
+    'KMS_KEY_ARN'
 ])
 
 sc = SparkContext()
@@ -38,6 +39,11 @@ glueContext = GlueContext(sc)
 spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args['JOB_NAME'], args)
+
+# Configure S3 to use SSE-KMS encryption
+hadoop_conf = sc._jsc.hadoopConfiguration()
+hadoop_conf.set("fs.s3.enableServerSideEncryption", "true")
+hadoop_conf.set("fs.s3.serverSideEncryption.kms.keyId", args['KMS_KEY_ARN'])
 
 logger = glueContext.get_logger()
 
