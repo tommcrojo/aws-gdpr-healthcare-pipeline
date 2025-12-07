@@ -261,6 +261,30 @@ Resources:
       Tags:
         Name: !Sub ${EnvironmentName}-etl-job
 
+  # Glue Crawler for Curated Data
+  CuratedDataCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Sub ${EnvironmentName}-curated-crawler
+      Role: !GetAtt GlueJobRole.Arn
+      DatabaseName: !Ref HealthcareDatabase
+      Description: Crawl curated health records to update schema
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${CuratedDataBucket}/curated/
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: LOG
+      Configuration: >
+        {
+          "Version": 1.0,
+          "Grouping": {
+            "TableGroupingPolicy": "CombineCompatibleSchemas"
+          }
+        }
+      Tags:
+        Name: !Sub ${EnvironmentName}-curated-crawler
+
   # CloudWatch Log Group for Glue
   GlueLogGroup:
     Type: AWS::Logs::LogGroup
@@ -304,3 +328,9 @@ Outputs:
     Value: !Ref HealthcareETLJob
     Export:
       Name: !Sub ${EnvironmentName}-GlueJobName
+
+  GlueCrawlerName:
+    Description: Name of the Glue crawler
+    Value: !Ref CuratedDataCrawler
+    Export:
+      Name: !Sub ${EnvironmentName}-GlueCrawlerName
