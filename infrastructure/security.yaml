@@ -120,6 +120,24 @@ Resources:
       LogGroupName: !Ref FirehoseLogGroup
       LogStreamName: S3Delivery
 
+  # Hashing Salt for GDPR Pseudonymization
+  HashingSaltSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}-hashing-salt
+      Description: Salt for SHA256 pseudonymization of patient IDs
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: salt
+        PasswordLength: 64
+        ExcludeCharacters: '"@/\'
+      KmsKeyId: !Ref HealthcareDataKey
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-hashing-salt
+        - Key: Purpose
+          Value: GDPR-Pseudonymization
+
 Outputs:
   KmsKeyArn:
     Description: ARN of the healthcare data KMS key
@@ -144,3 +162,9 @@ Outputs:
     Value: !Ref FirehoseLogGroup
     Export:
       Name: !Sub ${EnvironmentName}-FirehoseLogGroupName
+
+  HashingSaltSecretArn:
+    Description: ARN of the hashing salt secret
+    Value: !Ref HashingSaltSecret
+    Export:
+      Name: !Sub ${EnvironmentName}-HashingSaltSecretArn
