@@ -1,0 +1,304 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Glue ETL processing for GDPR healthcare pipeline
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: gdpr-healthcare
+    Description: Environment name prefix for resources
+
+Resources:
+  # Curated Data Bucket
+  CuratedDataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyId:
+                Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-curated-bucket
+        - Key: DataClassification
+          Value: PHI-Pseudonymized
+
+  CuratedBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CuratedDataBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyNonTLSAccess
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt CuratedDataBucket.Arn
+              - !Sub ${CuratedDataBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+          - Sid: DenyIncorrectEncryptionHeader
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub ${CuratedDataBucket.Arn}/*
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyUnencryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub ${CuratedDataBucket.Arn}/*
+            Condition:
+              'Null':
+                s3:x-amz-server-side-encryption: 'true'
+
+  # Quarantine Data Bucket
+  QuarantineDataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyId:
+                Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireQuarantinedData
+            Status: Enabled
+            ExpirationInDays: 90
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-quarantine-bucket
+        - Key: DataClassification
+          Value: PHI-Quarantined
+
+  QuarantineBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref QuarantineDataBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyNonTLSAccess
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt QuarantineDataBucket.Arn
+              - !Sub ${QuarantineDataBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  # Glue Scripts Bucket
+  GlueScriptsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-glue-scripts
+
+  # IAM Role for Glue Job
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-glue-etl-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: GlueETLPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3ReadRawBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - Fn::ImportValue: !Sub ${EnvironmentName}-RawBucketArn
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub ${EnvironmentName}-RawBucketArn
+              - Sid: S3WriteCuratedBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !GetAtt CuratedDataBucket.Arn
+                  - !Sub ${CuratedDataBucket.Arn}/*
+              - Sid: S3WriteQuarantineBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !GetAtt QuarantineDataBucket.Arn
+                  - !Sub ${QuarantineDataBucket.Arn}/*
+              - Sid: S3ReadGlueScripts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub ${GlueScriptsBucket.Arn}/*
+              - Sid: KMSAccess
+                Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Resource:
+                  Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+              - Sid: SecretsManagerAccess
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  Fn::ImportValue: !Sub ${EnvironmentName}-HashingSaltSecretArn
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws-glue/*
+
+  # Glue Database
+  HealthcareDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub ${EnvironmentName}_db
+        Description: Healthcare data catalog for GDPR pipeline
+
+  # Glue ETL Job
+  HealthcareETLJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub ${EnvironmentName}-etl-job
+      Description: Pseudonymize patient IDs and validate health records
+      Role: !GetAtt GlueJobRole.Arn
+      GlueVersion: '4.0'
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      Timeout: 60
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub s3://${GlueScriptsBucket}/scripts/etl_job.py
+        PythonVersion: '3'
+      DefaultArguments:
+        '--job-language': python
+        '--enable-metrics': 'true'
+        '--enable-continuous-cloudwatch-log': 'true'
+        '--enable-glue-datacatalog': 'true'
+        '--RAW_BUCKET':
+          Fn::ImportValue: !Sub ${EnvironmentName}-RawBucketName
+        '--CURATED_BUCKET': !Ref CuratedDataBucket
+        '--QUARANTINE_BUCKET': !Ref QuarantineDataBucket
+        '--SECRET_ARN':
+          Fn::ImportValue: !Sub ${EnvironmentName}-HashingSaltSecretArn
+        '--DATABASE_NAME': !Ref HealthcareDatabase
+        '--TABLE_NAME': curated_health_records
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Tags:
+        Name: !Sub ${EnvironmentName}-etl-job
+
+  # CloudWatch Log Group for Glue
+  GlueLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws-glue/jobs/${EnvironmentName}-etl-job
+      RetentionInDays: 30
+
+Outputs:
+  CuratedBucketName:
+    Description: Name of the curated data S3 bucket
+    Value: !Ref CuratedDataBucket
+    Export:
+      Name: !Sub ${EnvironmentName}-CuratedBucketName
+
+  CuratedBucketArn:
+    Description: ARN of the curated data S3 bucket
+    Value: !GetAtt CuratedDataBucket.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-CuratedBucketArn
+
+  QuarantineBucketName:
+    Description: Name of the quarantine S3 bucket
+    Value: !Ref QuarantineDataBucket
+    Export:
+      Name: !Sub ${EnvironmentName}-QuarantineBucketName
+
+  GlueScriptsBucketName:
+    Description: Name of the Glue scripts bucket
+    Value: !Ref GlueScriptsBucket
+    Export:
+      Name: !Sub ${EnvironmentName}-GlueScriptsBucketName
+
+  GlueDatabaseName:
+    Description: Glue Data Catalog database name
+    Value: !Ref HealthcareDatabase
+    Export:
+      Name: !Sub ${EnvironmentName}-GlueDatabaseName
+
+  GlueJobName:
+    Description: Name of the Glue ETL job
+    Value: !Ref HealthcareETLJob
+    Export:
+      Name: !Sub ${EnvironmentName}-GlueJobName
