@@ -37,6 +37,19 @@ Resources:
             Condition:
               StringEquals:
                 aws:RequestedRegion: eu-central-1
+          - Sid: AllowGlueService
+            Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-cmk
