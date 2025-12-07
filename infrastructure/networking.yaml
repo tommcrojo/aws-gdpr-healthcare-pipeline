@@ -117,6 +117,20 @@ Resources:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
 
+  # Secrets Manager Interface Endpoint
+  SecretsManagerInterfaceEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
 Outputs:
   VpcId:
     Description: VPC ID
