@@ -18,7 +18,7 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: aws:kms
-              KMSMasterKeyId:
+              KMSMasterKeyID:
                 Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
             BucketKeyEnabled: true
       PublicAccessBlockConfiguration:
@@ -78,7 +78,7 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: aws:kms
-              KMSMasterKeyId:
+              KMSMasterKeyID:
                 Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
             BucketKeyEnabled: true
       PublicAccessBlockConfiguration:
