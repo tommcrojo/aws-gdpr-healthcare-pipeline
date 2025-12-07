@@ -12,7 +12,7 @@ echo "Region: ${REGION}"
 echo ""
 
 # Deploy networking stack
-echo "[1/3] Deploying networking stack..."
+echo "[1/4] Deploying networking stack..."
 aws cloudformation deploy \
     --template-file "${INFRA_DIR}/networking.yaml" \
     --stack-name "${ENVIRONMENT_NAME}-networking" \
@@ -20,10 +20,10 @@ aws cloudformation deploy \
     --region "${REGION}" \
     --no-fail-on-empty-changeset
 
-echo "[1/3] Networking stack deployed successfully."
+echo "[1/4] Networking stack deployed successfully."
 
 # Deploy security stack
-echo "[2/3] Deploying security stack..."
+echo "[2/4] Deploying security stack..."
 aws cloudformation deploy \
     --template-file "${INFRA_DIR}/security.yaml" \
     --stack-name "${ENVIRONMENT_NAME}-security" \
@@ -32,10 +32,10 @@ aws cloudformation deploy \
     --region "${REGION}" \
     --no-fail-on-empty-changeset
 
-echo "[2/3] Security stack deployed successfully."
+echo "[2/4] Security stack deployed successfully."
 
 # Deploy storage and ingestion stack
-echo "[3/3] Deploying storage and ingestion stack..."
+echo "[3/4] Deploying storage and ingestion stack..."
 aws cloudformation deploy \
     --template-file "${INFRA_DIR}/storage-ingestion.yaml" \
     --stack-name "${ENVIRONMENT_NAME}-storage-ingestion" \
@@ -43,7 +43,31 @@ aws cloudformation deploy \
     --region "${REGION}" \
     --no-fail-on-empty-changeset
 
-echo "[3/3] Storage and ingestion stack deployed successfully."
+echo "[3/4] Storage and ingestion stack deployed successfully."
+
+# Deploy processing stack
+echo "[4/4] Deploying processing stack..."
+aws cloudformation deploy \
+    --template-file "${INFRA_DIR}/processing.yaml" \
+    --stack-name "${ENVIRONMENT_NAME}-processing" \
+    --parameter-overrides EnvironmentName="${ENVIRONMENT_NAME}" \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --region "${REGION}" \
+    --no-fail-on-empty-changeset
+
+echo "[4/4] Processing stack deployed successfully."
+
+# Upload ETL script to Glue scripts bucket
+GLUE_SCRIPTS_BUCKET=$(aws cloudformation describe-stacks \
+    --stack-name "${ENVIRONMENT_NAME}-processing" \
+    --region "${REGION}" \
+    --query 'Stacks[0].Outputs[?OutputKey==`GlueScriptsBucketName`].OutputValue' \
+    --output text)
+
+echo "Uploading ETL script to s3://${GLUE_SCRIPTS_BUCKET}/scripts/"
+aws s3 cp "${SCRIPT_DIR}/../src/processing/etl_job.py" \
+    "s3://${GLUE_SCRIPTS_BUCKET}/scripts/etl_job.py" \
+    --region "${REGION}"
 
 echo ""
 echo "All stacks deployed successfully!"
