@@ -31,7 +31,10 @@ args = getResolvedOptions(sys.argv, [
     'SECRET_ARN',
     'DATABASE_NAME',
     'TABLE_NAME',
-    'KMS_KEY_ARN'
+    'KMS_KEY_ARN',
+    'REDSHIFT_CONNECTION',
+    'REDSHIFT_IAM_ROLE',
+    'REDSHIFT_TEMP_DIR'
 ])
 
 sc = SparkContext()
@@ -65,6 +68,29 @@ def create_hash_udf(salt: str):
         return hashlib.sha256(combined.encode('utf-8')).hexdigest()
 
     return F.udf(hash_patient_id, StringType())
+
+
+def load_to_redshift(df_curated, glue_context, year: str, month: str, day: str):
+    """
+    Load curated data to Redshift using native Glue JDBC connector.
+    Uses preactions to ensure idempotency (delete-before-load).
+    """
+    curated_dyf = DynamicFrame.fromDF(df_curated, glue_context, "redshift_load")
+
+    # Preaction: Delete existing partition data for idempotency
+    preaction_sql = f"DELETE FROM patient_data.patient_vitals WHERE year='{year}' AND month='{month}' AND day='{day}'"
+
+    glue_context.write_dynamic_frame.from_jdbc_conf(
+        frame=curated_dyf,
+        catalog_connection=args['REDSHIFT_CONNECTION'],
+        connection_options={
+            "dbtable": "patient_data.patient_vitals",
+            "database": "healthcare_analytics",
+            "preactions": preaction_sql
+        },
+        redshift_tmp_dir=args['REDSHIFT_TEMP_DIR'],
+        transformation_ctx="redshift_sink"
+    )
 
 
 def main():
@@ -217,6 +243,11 @@ def main():
             transformation_ctx="curated_sink"
         )
         logger.info("Curated data written successfully")
+
+        # Load to Redshift using native JDBC connector
+        logger.info("Loading curated data to Redshift...")
+        load_to_redshift(df_curated, glueContext, year, month, day)
+        logger.info("Redshift load completed successfully")
 
     # Write quarantine data to S3 as Parquet
     if quarantine_count > 0:

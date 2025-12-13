@@ -216,6 +216,23 @@ Resources:
                   - logs:PutLogEvents
                 Resource:
                   - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws-glue/*
+              - Sid: GlueConnectionAccess
+                Effect: Allow
+                Action:
+                  - glue:GetConnection
+                Resource:
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:connection/*
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog
+              - Sid: EC2NetworkAccess
+                Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcAttribute
+                Resource: '*'
 
   # Glue Database
   HealthcareDatabase:
@@ -256,6 +273,14 @@ Resources:
           Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
         '--DATABASE_NAME': !Ref HealthcareDatabase
         '--TABLE_NAME': curated_health_records
+        '--REDSHIFT_CONNECTION':
+          Fn::ImportValue: !Sub ${EnvironmentName}-GlueConnectionName
+        '--REDSHIFT_IAM_ROLE':
+          Fn::ImportValue: !Sub ${EnvironmentName}-RedshiftS3RoleArn
+        '--REDSHIFT_TEMP_DIR': !Sub s3://${CuratedDataBucket}/redshift-temp/
+      Connections:
+        Connections:
+          - Fn::ImportValue: !Sub ${EnvironmentName}-GlueConnectionName
       ExecutionProperty:
         MaxConcurrentRuns: 1
       Tags:
