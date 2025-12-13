@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: KMS Customer Managed Key for GDPR healthcare pipeline (one-time setup)
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: gdpr-healthcare
+    Description: Environment name prefix for resources
+
+Resources:
+  # Customer Managed KMS Key
+  HealthcareDataKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    Properties:
+      Description: CMK for encrypting healthcare data in the GDPR pipeline
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: healthcare-data-key-policy
+        Statement:
+          - Sid: AllowAccountRoot
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowFirehoseService
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+          - Sid: AllowGlueService
+            Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+          - Sid: AllowKeyAdministrators
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt KmsAdminRole.Arn
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-cmk
+
+  HealthcareDataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/healthcare-gdpr
+      TargetKeyId: !Ref HealthcareDataKey
+
+  # KMS Key Administrator Role
+  KmsAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: healthcare-gdpr-kms-admin
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+
+Outputs:
+  KmsKeyArn:
+    Description: ARN of the healthcare data KMS key
+    Value: !GetAtt HealthcareDataKey.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-KmsKeyArn
+
+  KmsKeyId:
+    Description: ID of the healthcare data KMS key
+    Value: !Ref HealthcareDataKey
+    Export:
+      Name: !Sub ${EnvironmentName}-KmsKeyId
+
+  KmsAdminRoleArn:
+    Description: ARN of the KMS admin role
+    Value: !GetAtt KmsAdminRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-KmsAdminRoleArn
