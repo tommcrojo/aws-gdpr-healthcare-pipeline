@@ -11,6 +11,7 @@ Resources:
   # Customer Managed KMS Key
   HealthcareDataKey:
     Type: AWS::KMS::Key
+    DeletionPolicy: Retain
     Properties:
       Description: CMK for encrypting healthcare data in the GDPR pipeline
       EnableKeyRotation: true
@@ -50,6 +51,26 @@ Resources:
             Condition:
               StringEquals:
                 aws:RequestedRegion: eu-central-1
+          - Sid: AllowKeyAdministrators
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt KmsAdminRole.Arn
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+            Resource: '*'
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-cmk
@@ -120,6 +141,19 @@ Resources:
       LogGroupName: !Ref FirehoseLogGroup
       LogStreamName: S3Delivery
 
+  # KMS Key Administrator Role
+  KmsAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: healthcare-gdpr-kms-admin
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+
   # Hashing Salt for GDPR Pseudonymization
   HashingSaltSecret:
     Type: AWS::SecretsManager::Secret
@@ -150,6 +184,12 @@ Outputs:
     Value: !Ref HealthcareDataKey
     Export:
       Name: !Sub ${EnvironmentName}-KmsKeyId
+
+  KmsAdminRoleArn:
+    Description: ARN of the KMS admin role
+    Value: !GetAtt KmsAdminRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-KmsAdminRoleArn
 
   FirehoseRoleArn:
     Description: ARN of the Firehose delivery role
