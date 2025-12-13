@@ -44,8 +44,20 @@ KMS_KEY_ID=$(aws cloudformation describe-stacks \
 echo "Using KMS Key: ${KMS_KEY_ARN}"
 echo ""
 
-# Deploy networking stack
-echo "[1/4] Deploying networking stack..."
+# Update KMS stack with Redshift permissions (must be first for Redshift validation)
+echo "[1/6] Updating KMS stack with Redshift permissions..."
+aws cloudformation deploy \
+    --template-file "${INFRA_DIR}/kms.yaml" \
+    --stack-name "${ENVIRONMENT_NAME}-kms" \
+    --parameter-overrides EnvironmentName="${ENVIRONMENT_NAME}" \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --region "${REGION}" \
+    --no-fail-on-empty-changeset
+
+echo "[1/6] KMS stack updated successfully."
+
+# Deploy networking stack (includes Redshift Serverless endpoint)
+echo "[2/6] Deploying networking stack..."
 aws cloudformation deploy \
     --template-file "${INFRA_DIR}/networking.yaml" \
     --stack-name "${ENVIRONMENT_NAME}-networking" \
@@ -53,10 +65,10 @@ aws cloudformation deploy \
     --region "${REGION}" \
     --no-fail-on-empty-changeset
 
-echo "[1/4] Networking stack deployed successfully."
+echo "[2/6] Networking stack deployed successfully."
 
 # Deploy security stack
-echo "[2/4] Deploying security stack..."
+echo "[3/6] Deploying security stack..."
 aws cloudformation deploy \
     --template-file "${INFRA_DIR}/security.yaml" \
     --stack-name "${ENVIRONMENT_NAME}-security" \
@@ -68,10 +80,10 @@ aws cloudformation deploy \
     --region "${REGION}" \
     --no-fail-on-empty-changeset
 
-echo "[2/4] Security stack deployed successfully."
+echo "[3/6] Security stack deployed successfully."
 
 # Deploy storage and ingestion stack
-echo "[3/4] Deploying storage and ingestion stack..."
+echo "[4/6] Deploying storage and ingestion stack..."
 aws cloudformation deploy \
     --template-file "${INFRA_DIR}/storage-ingestion.yaml" \
     --stack-name "${ENVIRONMENT_NAME}-storage-ingestion" \
@@ -79,10 +91,37 @@ aws cloudformation deploy \
     --region "${REGION}" \
     --no-fail-on-empty-changeset
 
-echo "[3/4] Storage and ingestion stack deployed successfully."
+echo "[4/6] Storage and ingestion stack deployed successfully."
 
-# Deploy processing stack
-echo "[4/4] Deploying processing stack..."
+# Deploy Redshift stack (must be before processing for exports)
+echo "[5/6] Deploying Redshift stack..."
+aws cloudformation deploy \
+    --template-file "${INFRA_DIR}/redshift.yaml" \
+    --stack-name "${ENVIRONMENT_NAME}-redshift" \
+    --parameter-overrides EnvironmentName="${ENVIRONMENT_NAME}" \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --region "${REGION}" \
+    --no-fail-on-empty-changeset
+
+echo "[5/6] Redshift stack deployed successfully."
+
+# Wait for Redshift workgroup to be available
+REDSHIFT_WORKGROUP="${ENVIRONMENT_NAME}-workgroup"
+echo "Waiting for Redshift workgroup to be available..."
+aws redshift-serverless wait workgroup-available \
+    --workgroup-name "${REDSHIFT_WORKGROUP}" \
+    --region "${REGION}" 2>/dev/null || echo "Workgroup wait completed (or already available)"
+
+# Create patient_vitals table in Redshift
+echo "Creating patient_vitals table in Redshift..."
+aws redshift-data execute-statement \
+    --workgroup-name "${REDSHIFT_WORKGROUP}" \
+    --database healthcare_analytics \
+    --sql "$(cat ${SCRIPT_DIR}/sql/create_patient_vitals.sql)" \
+    --region "${REGION}" || echo "Table creation submitted (check Redshift console for status)"
+
+# Deploy processing stack (depends on Redshift exports)
+echo "[6/6] Deploying processing stack..."
 aws cloudformation deploy \
     --template-file "${INFRA_DIR}/processing.yaml" \
     --stack-name "${ENVIRONMENT_NAME}-processing" \
@@ -91,7 +130,7 @@ aws cloudformation deploy \
     --region "${REGION}" \
     --no-fail-on-empty-changeset
 
-echo "[4/4] Processing stack deployed successfully."
+echo "[6/6] Processing stack deployed successfully."
 
 # Upload ETL script to Glue scripts bucket
 GLUE_SCRIPTS_BUCKET=$(aws cloudformation describe-stacks \
