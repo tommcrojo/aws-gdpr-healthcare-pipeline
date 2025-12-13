@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Redshift Serverless for GDPR healthcare pipeline analytics
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: gdpr-healthcare
+    Description: Environment name prefix for resources
+
+Resources:
+  # Security Group for Glue Connection (source)
+  GlueConnectionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Glue connections to Redshift
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-glue-connection-sg
+
+  # Self-referencing ingress for Glue ENI communication
+  GlueConnectionSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref GlueConnectionSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref GlueConnectionSecurityGroup
+      Description: Self-reference for Glue ENI communication
+
+  # Egress to Redshift
+  GlueConnectionRedshiftEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref GlueConnectionSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5439
+      ToPort: 5439
+      DestinationSecurityGroupId: !Ref RedshiftSecurityGroup
+      Description: Allow outbound to Redshift
+
+  # Egress to S3 Gateway Endpoint (HTTPS)
+  GlueConnectionS3Egress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref GlueConnectionSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: Allow HTTPS for S3 and AWS APIs
+
+  # Security Group for Redshift (destination)
+  RedshiftSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Redshift Serverless
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-redshift-sg
+
+  # Ingress from Glue Connection SG (source-destination pattern)
+  RedshiftGlueIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RedshiftSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5439
+      ToPort: 5439
+      SourceSecurityGroupId: !Ref GlueConnectionSecurityGroup
+      Description: Allow Glue ETL access on port 5439
+
+  # IAM Role for Redshift S3 COPY operations
+  RedshiftS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-redshift-s3-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: redshift.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RedshiftS3CopyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3ReadCuratedBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketArn
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketArn
+              - Sid: KMSDecrypt
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-redshift-s3-role
+
+  # Secrets Manager for Redshift admin credentials
+  RedshiftAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub ${EnvironmentName}-redshift-admin
+      Description: Admin credentials for Redshift Serverless
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'''
+      KmsKeyId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-redshift-admin
+
+  # Redshift Serverless Namespace
+  RedshiftNamespace:
+    Type: AWS::RedshiftServerless::Namespace
+    Properties:
+      NamespaceName: !Sub ${EnvironmentName}-namespace
+      DbName: healthcare_analytics
+      AdminUsername: admin
+      AdminUserPassword: !Sub '{{resolve:secretsmanager:${RedshiftAdminSecret}:SecretString:password}}'
+      IamRoles:
+        - !GetAtt RedshiftS3Role.Arn
+      DefaultIamRoleArn: !GetAtt RedshiftS3Role.Arn
+      KmsKeyId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+      LogExports:
+        - userlog
+        - connectionlog
+        - useractivitylog
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-namespace
+
+  # Redshift Serverless Workgroup
+  RedshiftWorkgroup:
+    Type: AWS::RedshiftServerless::Workgroup
+    DependsOn: RedshiftNamespace
+    Properties:
+      WorkgroupName: !Sub ${EnvironmentName}-workgroup
+      NamespaceName: !Sub ${EnvironmentName}-namespace
+      BaseCapacity: 32
+      PubliclyAccessible: false
+      SubnetIds: !Split
+        - ','
+        - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnetIds
+      SecurityGroupIds:
+        - !Ref RedshiftSecurityGroup
+      EnhancedVpcRouting: true
+      ConfigParameters:
+        - ParameterKey: enable_user_activity_logging
+          ParameterValue: 'true'
+        - ParameterKey: require_ssl
+          ParameterValue: 'true'
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-workgroup
+
+  # Glue Connection for JDBC access to Redshift
+  RedshiftGlueConnection:
+    Type: AWS::Glue::Connection
+    DependsOn: RedshiftWorkgroup
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      ConnectionInput:
+        Name: !Sub ${EnvironmentName}-redshift-connection
+        ConnectionType: JDBC
+        PhysicalConnectionRequirements:
+          AvailabilityZone: eu-central-1a
+          SubnetId: !Select
+            - 0
+            - !Split
+              - ','
+              - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnetIds
+          SecurityGroupIdList:
+            - !Ref GlueConnectionSecurityGroup
+        ConnectionProperties:
+          JDBC_CONNECTION_URL: !Sub
+            - 'jdbc:redshift://${Endpoint}:5439/healthcare_analytics'
+            - Endpoint: !GetAtt RedshiftWorkgroup.Workgroup.Endpoint.Address
+          USERNAME: admin
+          PASSWORD: !Sub '{{resolve:secretsmanager:${RedshiftAdminSecret}:SecretString:password}}'
+
+Outputs:
+  RedshiftWorkgroupName:
+    Description: Redshift Serverless workgroup name
+    Value: !Ref RedshiftWorkgroup
+    Export:
+      Name: !Sub ${EnvironmentName}-RedshiftWorkgroupName
+
+  RedshiftNamespaceName:
+    Description: Redshift Serverless namespace name
+    Value: !Ref RedshiftNamespace
+    Export:
+      Name: !Sub ${EnvironmentName}-RedshiftNamespaceName
+
+  RedshiftEndpoint:
+    Description: Redshift Serverless endpoint
+    Value: !GetAtt RedshiftWorkgroup.Workgroup.Endpoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-RedshiftEndpoint
+
+  RedshiftS3RoleArn:
+    Description: IAM role ARN for Redshift S3 access
+    Value: !GetAtt RedshiftS3Role.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-RedshiftS3RoleArn
+
+  RedshiftSecretArn:
+    Description: Secrets Manager ARN for Redshift credentials
+    Value: !Ref RedshiftAdminSecret
+    Export:
+      Name: !Sub ${EnvironmentName}-RedshiftSecretArn
+
+  GlueConnectionName:
+    Description: Glue connection name for Redshift
+    Value: !Sub ${EnvironmentName}-redshift-connection
+    Export:
+      Name: !Sub ${EnvironmentName}-GlueConnectionName
+
+  GlueConnectionSecurityGroupId:
+    Description: Security group ID for Glue connections
+    Value: !Ref GlueConnectionSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-GlueConnectionSGId
