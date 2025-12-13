@@ -1,0 +1,13 @@
+# GDPR Healthcare Pipeline - Test Requirements
+
+# Testing framework
+pytest>=7.4.0
+pytest-timeout>=2.2.0
+pytest-env>=1.1.0
+
+# AWS SDK
+boto3>=1.34.0
+botocore>=1.34.0
+
+# Utilities
+python-dateutil>=2.8.2
