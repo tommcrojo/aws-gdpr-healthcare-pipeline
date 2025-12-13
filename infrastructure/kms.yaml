@@ -51,6 +51,19 @@ Resources:
             Condition:
               StringEquals:
                 aws:RequestedRegion: eu-central-1
+          - Sid: AllowRedshiftService
+            Effect: Allow
+            Principal:
+              Service: redshift.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
           - Sid: AllowKeyAdministrators
             Effect: Allow
             Principal:
