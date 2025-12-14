@@ -8,66 +8,6 @@ Parameters:
     Description: Environment name prefix for resources
 
 Resources:
-  # Curated Data Bucket
-  CuratedDataBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: aws:kms
-              KMSMasterKeyID:
-                Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
-            BucketKeyEnabled: true
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-curated-bucket
-        - Key: DataClassification
-          Value: PHI-Pseudonymized
-
-  CuratedBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref CuratedDataBucket
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: DenyNonTLSAccess
-            Effect: Deny
-            Principal: '*'
-            Action: s3:*
-            Resource:
-              - !GetAtt CuratedDataBucket.Arn
-              - !Sub ${CuratedDataBucket.Arn}/*
-            Condition:
-              Bool:
-                aws:SecureTransport: 'false'
-          - Sid: DenyIncorrectEncryptionHeader
-            Effect: Deny
-            Principal: '*'
-            Action: s3:PutObject
-            Resource: !Sub ${CuratedDataBucket.Arn}/*
-            Condition:
-              StringNotEquals:
-                s3:x-amz-server-side-encryption: aws:kms
-          - Sid: DenyUnencryptedObjectUploads
-            Effect: Deny
-            Principal: '*'
-            Action: s3:PutObject
-            Resource: !Sub ${CuratedDataBucket.Arn}/*
-            Condition:
-              'Null':
-                s3:x-amz-server-side-encryption: 'true'
-
   # Quarantine Data Bucket
   QuarantineDataBucket:
     Type: AWS::S3::Bucket
@@ -174,8 +114,11 @@ Resources:
                   - s3:ListBucket
                   - s3:GetBucketLocation
                 Resource:
-                  - !GetAtt CuratedDataBucket.Arn
-                  - !Sub ${CuratedDataBucket.Arn}/*
+                  - Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketArn
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketArn
               - Sid: S3WriteQuarantineBucket
                 Effect: Allow
                 Action:
@@ -265,7 +208,8 @@ Resources:
         '--enable-glue-datacatalog': 'true'
         '--RAW_BUCKET':
           Fn::ImportValue: !Sub ${EnvironmentName}-RawBucketName
-        '--CURATED_BUCKET': !Ref CuratedDataBucket
+        '--CURATED_BUCKET':
+          Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketName
         '--QUARANTINE_BUCKET': !Ref QuarantineDataBucket
         '--SECRET_ARN':
           Fn::ImportValue: !Sub ${EnvironmentName}-HashingSaltSecretArn
@@ -277,7 +221,10 @@ Resources:
           Fn::ImportValue: !Sub ${EnvironmentName}-GlueConnectionName
         '--REDSHIFT_IAM_ROLE':
           Fn::ImportValue: !Sub ${EnvironmentName}-RedshiftS3RoleArn
-        '--REDSHIFT_TEMP_DIR': !Sub s3://${CuratedDataBucket}/redshift-temp/
+        '--REDSHIFT_TEMP_DIR': !Sub
+          - 's3://${CuratedBucket}/redshift-temp/'
+          - CuratedBucket:
+              Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketName
       Connections:
         Connections:
           - Fn::ImportValue: !Sub ${EnvironmentName}-GlueConnectionName
@@ -296,7 +243,10 @@ Resources:
       Description: Crawl curated health records to update schema
       Targets:
         S3Targets:
-          - Path: !Sub s3://${CuratedDataBucket}/curated/
+          - Path: !Sub
+              - 's3://${CuratedBucket}/curated/'
+              - CuratedBucket:
+                  Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketName
       SchemaChangePolicy:
         UpdateBehavior: UPDATE_IN_DATABASE
         DeleteBehavior: LOG
@@ -318,18 +268,6 @@ Resources:
       RetentionInDays: 30
 
 Outputs:
-  CuratedBucketName:
-    Description: Name of the curated data S3 bucket
-    Value: !Ref CuratedDataBucket
-    Export:
-      Name: !Sub ${EnvironmentName}-CuratedBucketName
-
-  CuratedBucketArn:
-    Description: ARN of the curated data S3 bucket
-    Value: !GetAtt CuratedDataBucket.Arn
-    Export:
-      Name: !Sub ${EnvironmentName}-CuratedBucketArn
-
   QuarantineBucketName:
     Description: Name of the quarantine S3 bucket
     Value: !Ref QuarantineDataBucket
