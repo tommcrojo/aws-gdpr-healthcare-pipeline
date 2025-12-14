@@ -42,6 +42,17 @@ Resources:
         - Key: Name
           Value: !Sub ${EnvironmentName}-private-subnet-b
 
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: eu-central-1c
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-subnet-c
+
   # Private Route Table
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
@@ -61,6 +72,12 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetC
       RouteTableId: !Ref PrivateRouteTable
 
   # Security Group for VPC Endpoints
@@ -99,6 +116,7 @@ Resources:
       SubnetIds:
         - !Ref PrivateSubnetA
         - !Ref PrivateSubnetB
+        - !Ref PrivateSubnetC
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
@@ -113,6 +131,7 @@ Resources:
       SubnetIds:
         - !Ref PrivateSubnetA
         - !Ref PrivateSubnetB
+        - !Ref PrivateSubnetC
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
@@ -127,6 +146,7 @@ Resources:
       SubnetIds:
         - !Ref PrivateSubnetA
         - !Ref PrivateSubnetB
+        - !Ref PrivateSubnetC
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
@@ -141,6 +161,7 @@ Resources:
       SubnetIds:
         - !Ref PrivateSubnetA
         - !Ref PrivateSubnetB
+        - !Ref PrivateSubnetC
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
@@ -154,7 +175,7 @@ Outputs:
 
   PrivateSubnetIds:
     Description: Private subnet IDs
-    Value: !Join [',', [!Ref PrivateSubnetA, !Ref PrivateSubnetB]]
+    Value: !Join [',', [!Ref PrivateSubnetA, !Ref PrivateSubnetB, !Ref PrivateSubnetC]]
     Export:
       Name: !Sub ${EnvironmentName}-PrivateSubnetIds
 
