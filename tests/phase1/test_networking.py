@@ -62,12 +62,12 @@ class TestPrivateSubnets:
     """Test private subnet configuration."""
 
     def test_private_subnets_exist(self, ec2_client, networking_stack_outputs):
-        """Two private subnets should exist."""
+        """Three private subnets should exist (required for Redshift Serverless)."""
         subnet_ids = networking_stack_outputs.get("PrivateSubnetIds", "").split(",")
-        assert len(subnet_ids) == 2, f"Expected 2 subnets, got {len(subnet_ids)}"
+        assert len(subnet_ids) == 3, f"Expected 3 subnets, got {len(subnet_ids)}"
 
         response = ec2_client.describe_subnets(SubnetIds=subnet_ids)
-        assert len(response["Subnets"]) == 2, "Subnets not found"
+        assert len(response["Subnets"]) == 3, "Subnets not found"
 
     def test_subnets_in_different_azs(self, ec2_client, networking_stack_outputs):
         """Subnets should be in different availability zones."""
@@ -75,7 +75,7 @@ class TestPrivateSubnets:
         response = ec2_client.describe_subnets(SubnetIds=subnet_ids)
 
         azs = [s["AvailabilityZone"] for s in response["Subnets"]]
-        assert len(set(azs)) == 2, f"Subnets in same AZ: {azs}"
+        assert len(set(azs)) == 3, f"Subnets should be in 3 different AZs: {azs}"
 
     def test_subnets_no_public_ip(self, ec2_client, networking_stack_outputs):
         """Private subnets should not auto-assign public IPs."""
@@ -91,7 +91,7 @@ class TestPrivateSubnets:
         response = ec2_client.describe_subnets(SubnetIds=subnet_ids)
 
         cidrs = sorted([s["CidrBlock"] for s in response["Subnets"]])
-        expected = ["10.0.1.0/24", "10.0.2.0/24"]
+        expected = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
         assert cidrs == expected, f"Unexpected CIDRs: {cidrs}"
 
 

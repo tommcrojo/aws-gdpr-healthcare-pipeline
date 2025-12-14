@@ -20,7 +20,7 @@ class TestStorageStack:
 
     def test_storage_stack_has_required_outputs(self, storage_stack_outputs):
         """Storage stack should export bucket names and Firehose ARN."""
-        required = ["RawBucketName", "RawBucketArn", "FirehoseDeliveryStreamArn"]
+        required = ["RawBucketName", "RawBucketArn", "DeliveryStreamArn"]
         for output in required:
             assert output in storage_stack_outputs, f"Missing {output} output"
 

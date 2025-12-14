@@ -24,12 +24,16 @@ class TestProcessingStack:
         required = [
             "GlueJobName",
             "GlueDatabaseName",
-            "CuratedBucketName",
             "QuarantineBucketName",
             "GlueScriptsBucketName"
         ]
         for output in required:
             assert output in processing_stack_outputs, f"Missing {output} output"
+
+    def test_curated_bucket_in_storage_stack(self, storage_stack_outputs):
+        """CuratedBucketName should be in storage-ingestion stack."""
+        assert "CuratedBucketName" in storage_stack_outputs, \
+            "CuratedBucketName should be exported from storage-ingestion stack"
 
 
 @pytest.mark.phase2
@@ -232,10 +236,10 @@ class TestGlueCrawler:
         response = glue_client.get_crawler(Name=crawler_name)
         assert response["Crawler"]["Name"] == crawler_name
 
-    def test_glue_crawler_targets_curated_bucket(self, glue_client, environment_name, processing_stack_outputs):
+    def test_glue_crawler_targets_curated_bucket(self, glue_client, environment_name, storage_stack_outputs):
         """Glue crawler should target curated bucket."""
         crawler_name = f"{environment_name}-curated-crawler"
-        curated_bucket = processing_stack_outputs.get("CuratedBucketName")
+        curated_bucket = storage_stack_outputs.get("CuratedBucketName")
 
         response = glue_client.get_crawler(Name=crawler_name)
         targets = response["Crawler"]["Targets"].get("S3Targets", [])
@@ -249,24 +253,24 @@ class TestGlueCrawler:
 class TestCuratedBucket:
     """Test curated data bucket configuration."""
 
-    def test_curated_bucket_exists(self, s3_client, processing_stack_outputs):
+    def test_curated_bucket_exists(self, s3_client, storage_stack_outputs):
         """Curated bucket should exist."""
-        bucket_name = processing_stack_outputs.get("CuratedBucketName")
+        bucket_name = storage_stack_outputs.get("CuratedBucketName")
         response = s3_client.head_bucket(Bucket=bucket_name)
         assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
 
-    def test_curated_bucket_kms_encryption(self, s3_client, processing_stack_outputs):
+    def test_curated_bucket_kms_encryption(self, s3_client, storage_stack_outputs):
         """Curated bucket should use KMS encryption."""
-        bucket_name = processing_stack_outputs.get("CuratedBucketName")
+        bucket_name = storage_stack_outputs.get("CuratedBucketName")
         response = s3_client.get_bucket_encryption(Bucket=bucket_name)
 
         rules = response["ServerSideEncryptionConfiguration"]["Rules"]
         sse_algo = rules[0]["ApplyServerSideEncryptionByDefault"]["SSEAlgorithm"]
         assert sse_algo == "aws:kms", f"Expected aws:kms, got {sse_algo}"
 
-    def test_curated_bucket_blocks_public_access(self, s3_client, processing_stack_outputs):
+    def test_curated_bucket_blocks_public_access(self, s3_client, storage_stack_outputs):
         """Curated bucket should block public access."""
-        bucket_name = processing_stack_outputs.get("CuratedBucketName")
+        bucket_name = storage_stack_outputs.get("CuratedBucketName")
         response = s3_client.get_public_access_block(Bucket=bucket_name)
 
         config = response["PublicAccessBlockConfiguration"]

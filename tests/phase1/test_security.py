@@ -21,7 +21,7 @@ class TestSecurityStack:
 
     def test_security_stack_has_required_outputs(self, security_stack_outputs):
         """Security stack should export role ARNs and secret ARN."""
-        required = ["FirehoseDeliveryRoleArn", "HashingSaltSecretArn"]
+        required = ["FirehoseRoleArn", "HashingSaltSecretArn"]
         for output in required:
             assert output in security_stack_outputs, f"Missing {output} output"
 

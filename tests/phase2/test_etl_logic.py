@@ -195,9 +195,9 @@ class TestGlueJobExecution:
 class TestDataFlowIntegration:
     """Test data flow from raw to curated bucket."""
 
-    def test_curated_bucket_has_data(self, s3_client, processing_stack_outputs):
+    def test_curated_bucket_has_data(self, s3_client, storage_stack_outputs):
         """Curated bucket should have data after ETL run (if job has run)."""
-        bucket_name = processing_stack_outputs.get("CuratedBucketName")
+        bucket_name = storage_stack_outputs.get("CuratedBucketName")
 
         response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="curated/", MaxKeys=10)
 
@@ -209,9 +209,9 @@ class TestDataFlowIntegration:
         else:
             pytest.skip("No data in curated bucket yet (ETL may not have run)")
 
-    def test_curated_data_is_partitioned(self, s3_client, processing_stack_outputs):
+    def test_curated_data_is_partitioned(self, s3_client, storage_stack_outputs):
         """Curated data should be partitioned by year/month/day."""
-        bucket_name = processing_stack_outputs.get("CuratedBucketName")
+        bucket_name = storage_stack_outputs.get("CuratedBucketName")
 
         response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="curated/", MaxKeys=100)
 
@@ -223,10 +223,10 @@ class TestDataFlowIntegration:
         else:
             pytest.skip("No data to check partitioning")
 
-    def test_curated_data_no_raw_patient_id(self, s3_client, processing_stack_outputs):
+    def test_curated_data_no_raw_patient_id(self, s3_client, storage_stack_outputs):
         """Curated data should not contain raw patient_id column."""
         # This would require reading Parquet files - simplified check
-        bucket_name = processing_stack_outputs.get("CuratedBucketName")
+        bucket_name = storage_stack_outputs.get("CuratedBucketName")
 
         # Check that data exists first
         response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix="curated/", MaxKeys=1)
