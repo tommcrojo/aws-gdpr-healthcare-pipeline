@@ -140,11 +140,11 @@ def main():
     # Convert to DataFrame for transformations
     df = raw_dyf.toDF()
 
-    # Flatten nested structure
+    # Flatten nested structure and convert timestamp to proper type
     df_flattened = df.select(
         F.col("record_id"),
         F.col("patient_id"),
-        F.col("timestamp"),
+        F.to_timestamp(F.col("timestamp")).alias("timestamp"),
         F.col("event_type"),
         F.col("data.heart_rate").alias("heart_rate"),
         F.col("data.blood_pressure_systolic").alias("blood_pressure_systolic"),
@@ -185,7 +185,7 @@ def main():
     # Add processing metadata
     df_curated = df_curated.withColumn(
         "processed_at",
-        F.lit(datetime.utcnow().isoformat())
+        F.current_timestamp()
     ).withColumn(
         "year",
         F.lit(year)
