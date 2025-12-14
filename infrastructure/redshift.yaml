@@ -30,6 +30,17 @@ Resources:
       SourceSecurityGroupId: !Ref GlueConnectionSecurityGroup
       Description: Self-reference for Glue ENI communication
 
+  # Self-referencing egress for Glue ENI communication (required by AWS Glue)
+  GlueConnectionSelfEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref GlueConnectionSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      DestinationSecurityGroupId: !Ref GlueConnectionSecurityGroup
+      Description: Self-reference for Glue ENI communication
+
   # Egress to Redshift
   GlueConnectionRedshiftEgress:
     Type: AWS::EC2::SecurityGroupEgress
