@@ -1,0 +1,352 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GDPR Article 17 Right to Erasure compliance infrastructure
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: gdpr-healthcare
+    Description: Environment name prefix for resources
+
+Resources:
+  # DynamoDB Table for Erasure Requests
+  GdprRequestsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${EnvironmentName}-gdpr-requests
+      AttributeDefinitions:
+        - AttributeName: request_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: requested_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: request_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId:
+          Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+      GlobalSecondaryIndexes:
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: requested_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-gdpr-requests
+        - Key: Purpose
+          Value: GDPR-Compliance
+
+  # Athena Workgroup for Erasure Operations
+  ErasureAthenaWorkgroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-erasure-workgroup
+      State: ENABLED
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        ResultConfiguration:
+          OutputLocation: !Sub
+            - 's3://${Bucket}/athena-results/'
+            - Bucket:
+                Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketName
+          EncryptionConfiguration:
+            EncryptionOption: SSE_KMS
+            KmsKey:
+              Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-erasure-workgroup
+
+  # Security Group for Lambda in VPC
+  ErasureLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for erasure Lambda function
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS for AWS APIs via VPC endpoints
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-erasure-lambda-sg
+
+  # IAM Role for Erasure Handler Lambda
+  ErasureHandlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-erasure-handler-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ErasureHandlerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # DynamoDB Stream Read + Table Update
+              - Sid: DynamoDBStreamAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:DescribeStream
+                  - dynamodb:ListStreams
+                Resource: !Sub ${GdprRequestsTable.Arn}/stream/*
+              - Sid: DynamoDBTableAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt GdprRequestsTable.Arn
+                  - !Sub ${GdprRequestsTable.Arn}/index/*
+              # Athena Operations
+              - Sid: AthenaAccess
+                Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:StopQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                Resource:
+                  - !Sub arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${ErasureAthenaWorkgroup}
+              # Glue Catalog Access
+              - Sid: GlueCatalogAccess
+                Effect: Allow
+                Action:
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartitions
+                  - glue:GetDatabase
+                  - glue:BatchDeleteTable
+                  - glue:DeleteTable
+                  - glue:CreateTable
+                  - glue:UpdateTable
+                Resource:
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${EnvironmentName}_db
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${EnvironmentName}_db/*
+              # S3 Access for Curated Bucket
+              - Sid: S3CuratedBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketArn
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketArn
+              # KMS Access
+              - Sid: KMSAccess
+                Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Resource:
+                  Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+              # Redshift Data API
+              - Sid: RedshiftDataAccess
+                Effect: Allow
+                Action:
+                  - redshift-data:ExecuteStatement
+                  - redshift-data:DescribeStatement
+                  - redshift-data:GetStatementResult
+                Resource: '*'
+              - Sid: RedshiftServerlessAccess
+                Effect: Allow
+                Action:
+                  - redshift-serverless:GetCredentials
+                Resource: !Sub arn:aws:redshift-serverless:${AWS::Region}:${AWS::AccountId}:workgroup/*
+              # CloudWatch Logs
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${EnvironmentName}-erasure-handler*
+              # CloudWatch Metrics for monitoring
+              - Sid: CloudWatchMetrics
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: GDPR/Erasure
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-erasure-handler-role
+
+  # CloudWatch Log Group for Lambda
+  ErasureLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${EnvironmentName}-erasure-handler
+      RetentionInDays: 365
+      KmsKeyId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-KmsKeyArn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-erasure-handler-logs
+
+  # Lambda Function
+  ErasureHandlerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ErasureLogGroup
+    Properties:
+      FunctionName: !Sub ${EnvironmentName}-erasure-handler
+      Runtime: python3.12
+      Handler: erasure_handler.lambda_handler
+      Code:
+        S3Bucket:
+          Fn::ImportValue: !Sub ${EnvironmentName}-GlueScriptsBucketName
+        S3Key: compliance/erasure_handler.zip
+      Role: !GetAtt ErasureHandlerRole.Arn
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT_NAME: !Ref EnvironmentName
+          CURATED_BUCKET:
+            Fn::ImportValue: !Sub ${EnvironmentName}-CuratedBucketName
+          GLUE_DATABASE: !Sub ${EnvironmentName}_db
+          GLUE_TABLE: curated_health_records
+          ATHENA_WORKGROUP: !Ref ErasureAthenaWorkgroup
+          REDSHIFT_WORKGROUP:
+            Fn::ImportValue: !Sub ${EnvironmentName}-RedshiftWorkgroupName
+          REDSHIFT_DATABASE: healthcare_analytics
+          REQUESTS_TABLE: !Ref GdprRequestsTable
+      VpcConfig:
+        SubnetIds: !Split
+          - ','
+          - Fn::ImportValue: !Sub ${EnvironmentName}-PrivateSubnetIds
+        SecurityGroupIds:
+          - !Ref ErasureLambdaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-erasure-handler
+
+  # Lambda Event Source Mapping (DynamoDB Streams)
+  ErasureStreamTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt GdprRequestsTable.StreamArn
+      FunctionName: !Ref ErasureHandlerFunction
+      StartingPosition: TRIM_HORIZON
+      BatchSize: 1
+      MaximumBatchingWindowInSeconds: 0
+      FilterCriteria:
+        Filters:
+          - Pattern: '{"eventName":["INSERT"],"dynamodb":{"NewImage":{"status":{"S":["APPROVED"]}}}}'
+
+  # CloudWatch Alarm for Erasure Failures
+  ErasureFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-erasure-failures
+      AlarmDescription: Alert when erasure requests fail
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ErasureHandlerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for Erasure Duration
+  ErasureDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-erasure-duration
+      AlarmDescription: Alert when erasure takes too long
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ErasureHandlerFunction
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 120000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  GdprRequestsTableName:
+    Description: DynamoDB table for GDPR requests
+    Value: !Ref GdprRequestsTable
+    Export:
+      Name: !Sub ${EnvironmentName}-GdprRequestsTableName
+
+  GdprRequestsTableArn:
+    Description: ARN of GDPR requests table
+    Value: !GetAtt GdprRequestsTable.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-GdprRequestsTableArn
+
+  GdprRequestsStreamArn:
+    Description: Stream ARN of GDPR requests table
+    Value: !GetAtt GdprRequestsTable.StreamArn
+    Export:
+      Name: !Sub ${EnvironmentName}-GdprRequestsStreamArn
+
+  ErasureHandlerArn:
+    Description: ARN of erasure handler Lambda
+    Value: !GetAtt ErasureHandlerFunction.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-ErasureHandlerArn
+
+  ErasureHandlerName:
+    Description: Name of erasure handler Lambda
+    Value: !Ref ErasureHandlerFunction
+    Export:
+      Name: !Sub ${EnvironmentName}-ErasureHandlerName
+
+  ErasureAthenaWorkgroupName:
+    Description: Athena workgroup for erasure operations
+    Value: !Ref ErasureAthenaWorkgroup
+    Export:
+      Name: !Sub ${EnvironmentName}-ErasureAthenaWorkgroupName
+
+  ErasureHandlerRoleArn:
+    Description: IAM role ARN for erasure handler
+    Value: !GetAtt ErasureHandlerRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-ErasureHandlerRoleArn
