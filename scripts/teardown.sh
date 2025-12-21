@@ -50,7 +50,16 @@ echo "[1/6] Emptying S3 buckets..."
 [ -n "${SCRIPTS_BUCKET}" ] && [ "${SCRIPTS_BUCKET}" != "None" ] && empty_bucket "${SCRIPTS_BUCKET}"
 
 # Delete in reverse order of dependencies
-echo "[2/6] Deleting processing stack..."
+echo "[2/7] Deleting compliance stack..."
+aws cloudformation delete-stack \
+    --stack-name "${ENVIRONMENT_NAME}-compliance" \
+    --region "${REGION}" 2>/dev/null || echo "  Stack not found or already deleted"
+
+aws cloudformation wait stack-delete-complete \
+    --stack-name "${ENVIRONMENT_NAME}-compliance" \
+    --region "${REGION}" 2>/dev/null || true
+
+echo "[3/7] Deleting processing stack..."
 aws cloudformation delete-stack \
     --stack-name "${ENVIRONMENT_NAME}-processing" \
     --region "${REGION}" 2>/dev/null || echo "  Stack not found or already deleted"
@@ -59,7 +68,7 @@ aws cloudformation wait stack-delete-complete \
     --stack-name "${ENVIRONMENT_NAME}-processing" \
     --region "${REGION}" 2>/dev/null || true
 
-echo "[3/6] Deleting redshift stack..."
+echo "[4/7] Deleting redshift stack..."
 aws cloudformation delete-stack \
     --stack-name "${ENVIRONMENT_NAME}-redshift" \
     --region "${REGION}" 2>/dev/null || echo "  Stack not found or already deleted"
@@ -68,7 +77,7 @@ aws cloudformation wait stack-delete-complete \
     --stack-name "${ENVIRONMENT_NAME}-redshift" \
     --region "${REGION}" 2>/dev/null || true
 
-echo "[4/6] Deleting storage and ingestion stack..."
+echo "[5/7] Deleting storage and ingestion stack..."
 aws cloudformation delete-stack \
     --stack-name "${ENVIRONMENT_NAME}-storage-ingestion" \
     --region "${REGION}" 2>/dev/null || echo "  Stack not found or already deleted"
@@ -77,7 +86,7 @@ aws cloudformation wait stack-delete-complete \
     --stack-name "${ENVIRONMENT_NAME}-storage-ingestion" \
     --region "${REGION}" 2>/dev/null || true
 
-echo "[5/6] Deleting security stack..."
+echo "[6/7] Deleting security stack..."
 aws cloudformation delete-stack \
     --stack-name "${ENVIRONMENT_NAME}-security" \
     --region "${REGION}" 2>/dev/null || echo "  Stack not found or already deleted"
@@ -86,7 +95,7 @@ aws cloudformation wait stack-delete-complete \
     --stack-name "${ENVIRONMENT_NAME}-security" \
     --region "${REGION}" 2>/dev/null || true
 
-echo "[6/6] Deleting networking stack..."
+echo "[7/7] Deleting networking stack..."
 aws cloudformation delete-stack \
     --stack-name "${ENVIRONMENT_NAME}-networking" \
     --region "${REGION}" 2>/dev/null || echo "  Stack not found or already deleted"
