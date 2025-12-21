@@ -6,6 +6,7 @@
 #   ./scripts/run_tests.sh phase1    # Run Phase 1 tests only
 #   ./scripts/run_tests.sh phase2    # Run Phase 2 tests only
 #   ./scripts/run_tests.sh phase3    # Run Phase 3 tests only
+#   ./scripts/run_tests.sh phase4    # Run Phase 4 tests only
 #   ./scripts/run_tests.sh fast      # Run non-slow tests only
 #   ./scripts/run_tests.sh all       # Run all tests with verbose output
 
@@ -46,6 +47,10 @@ case "${1:-all}" in
         echo "Running Phase 3 tests (Redshift)..."
         pytest -m phase3 -v
         ;;
+    phase4)
+        echo "Running Phase 4 tests (GDPR Compliance)..."
+        pytest -m phase4 -v
+        ;;
     fast)
         echo "Running fast tests only (excluding slow tests)..."
         pytest -m "not slow" -v
@@ -59,12 +64,13 @@ case "${1:-all}" in
         pytest -v
         ;;
     *)
-        echo "Usage: $0 {phase1|phase2|phase3|fast|integration|all}"
+        echo "Usage: $0 {phase1|phase2|phase3|phase4|fast|integration|all}"
         echo ""
         echo "Options:"
         echo "  phase1      - Infrastructure tests (KMS, VPC, S3, Firehose)"
         echo "  phase2      - Processing tests (Glue ETL, data validation)"
         echo "  phase3      - Redshift integration tests"
+        echo "  phase4      - GDPR compliance tests (DynamoDB, Lambda, Athena)"
         echo "  fast        - All tests except slow ones"
         echo "  integration - Integration tests only"
         echo "  all         - Run all tests (default)"
