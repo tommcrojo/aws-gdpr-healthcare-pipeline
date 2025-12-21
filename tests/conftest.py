@@ -2,7 +2,7 @@
 GDPR Healthcare Pipeline - Test Configuration
 
 Shared fixtures and configuration for all test phases.
-Run specific phases with: pytest -m phase1, pytest -m phase2, pytest -m phase3
+Run specific phases with: pytest -m phase1, pytest -m phase2, pytest -m phase3, pytest -m phase4
 Run all tests with: pytest
 """
 
@@ -107,6 +107,36 @@ def iam_client(boto_config):
     return boto3.client("iam", config=boto_config)
 
 
+@pytest.fixture(scope="session")
+def dynamodb_client(boto_config):
+    """DynamoDB client."""
+    return boto3.client("dynamodb", config=boto_config)
+
+
+@pytest.fixture(scope="session")
+def lambda_client(boto_config):
+    """Lambda client."""
+    return boto3.client("lambda", config=boto_config)
+
+
+@pytest.fixture(scope="session")
+def athena_client(boto_config):
+    """Athena client."""
+    return boto3.client("athena", config=boto_config)
+
+
+@pytest.fixture(scope="session")
+def logs_client(boto_config):
+    """CloudWatch Logs client."""
+    return boto3.client("logs", config=boto_config)
+
+
+@pytest.fixture(scope="session")
+def cloudwatch_client(boto_config):
+    """CloudWatch client."""
+    return boto3.client("cloudwatch", config=boto_config)
+
+
 # Stack output helpers
 def get_stack_outputs(cf_client, stack_name):
     """Get outputs from a CloudFormation stack as a dictionary."""
@@ -163,11 +193,18 @@ def redshift_stack_outputs(cloudformation_client, environment_name):
     return get_stack_outputs(cloudformation_client, f"{environment_name}-redshift")
 
 
+@pytest.fixture(scope="session")
+def compliance_stack_outputs(cloudformation_client, environment_name):
+    """Outputs from compliance stack."""
+    return get_stack_outputs(cloudformation_client, f"{environment_name}-compliance")
+
+
 # Pytest markers for phase selection
 def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line("markers", "phase1: Phase 1 - Infrastructure tests")
     config.addinivalue_line("markers", "phase2: Phase 2 - Processing tests")
     config.addinivalue_line("markers", "phase3: Phase 3 - Redshift integration tests")
+    config.addinivalue_line("markers", "phase4: Phase 4 - GDPR compliance tests")
     config.addinivalue_line("markers", "integration: Integration tests requiring deployed infrastructure")
     config.addinivalue_line("markers", "slow: Slow-running tests")
