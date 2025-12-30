@@ -22,6 +22,9 @@ samconfig.toml
 *.log
 *.bak
 
+# Benchmarks
+benchmark-results/
+
 # OS
 .DS_Store
 Thumbs.db
