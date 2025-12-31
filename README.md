@@ -1,4 +1,4 @@
-# GDPR-Compliant Healthcare Data Pipeline
+# GDPR-Compliant Healthcare Data Pipeline 
 
 AWS-native data pipeline processing 10M+ daily health records with GDPR Article 17 (Right to Erasure) compliance.
 
